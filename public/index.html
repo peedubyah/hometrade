@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-beta.1/dist/css/select2.min.css" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-beta.1/dist/js/select2.min.js"></script>
+    <title>Item Search Form</title>
+</head>
+<body>
+    <h1>Item Search Parameters</h1>
+    <form id="searchForm">
+        <label for="mode">Mode:</label>
+        <select id="mode" name="mode" required>
+            <option value="">Select Mode (optional)</option>
+        </select><br><br>
+
+        <label for="itemType">Item Type:</label>
+        <select id="itemType" name="itemType" required>
+            <option value="">Select Item Type (optional)</option>
+        </select><br><br>
+
+        <label for="class">Class:</label>
+        <select id="class" name="class" required>
+            <option value="">Select Class (optional)</option>
+        </select><br><br>
+
+        <label for="powerLevelMin">Power Level Min:</label>
+        <input type="number" id="powerLevelMin" name="powerLevelMin" min="0" max="1000" placeholder="0 (optional)"><br><br>
+
+        <label for="powerLevelMax">Power Level Max:</label>
+        <input type="number" id="powerLevelMax" name="powerLevelMax" min="0" max="1000" placeholder="1000 (optional)"><br><br>
+
+        <div id="effectsGroupContainer">
+            <button type="button" onclick="addEffectGroup()">Add Effect Group</button>
+        </div><br><br>
+
+        <label for="sort">Sort by:</label>
+        <select id="sort" name="sort">
+            <option value="updatedAt,-1">Updated At - Newest</option>
+            <option value="createdAt,-1">Created At - Newest</option>
+        </select><br><br>
+
+        <button type="button" onclick="submitForm()">Submit</button>
+    </form>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            fetchAndPopulateSelect('Mode.json', document.getElementById('mode'));
+            fetchAndPopulateSelect('ItemTypes.json', document.getElementById('itemType'));
+            fetchAndPopulateSelect('Classes.json', document.getElementById('class'));
+
+            function fetchAndPopulateSelect(url, selectElement) {
+                fetch(url)
+                    .then(response => response.json())
+                    .then(data => populateDropdown(selectElement, data))
+                    .catch(error => console.error('Failed to load data:', error));
+            }
+
+            function populateDropdown(select, data) {
+                Object.entries(data).forEach(([key, value]) => {
+                    let option = document.createElement('option');
+                    option.value = value; // Value is what should be sent with submitForm
+                    option.textContent = key; // Key is what users see
+                    select.appendChild(option);
+                });
+            }
+
+            window.addEffectGroup = function() {
+                const container = document.getElementById('effectsGroupContainer');
+                const groupDiv = document.createElement('div');
+                groupDiv.className = 'effectsGroup';
+
+                const effectSelect = document.createElement('select');
+                effectSelect.name = 'effectId';
+                effectSelect.classList.add('effect-select'); // Add a class for Select2 initialization
+                groupDiv.appendChild(effectSelect);
+                fetchAndPopulateSelect('Affixes.json', effectSelect);
+
+                // Initialize Select2 on the new select element
+                $(effectSelect).select2({
+                    placeholder: "Select Effect",
+                    allowClear: true,
+                    width: '100%' // Adjust width to fit the container
+                });
+
+                ['minValue', 'maxValue'].forEach(field => {
+                    const input = document.createElement('input');
+                    input.type = 'number';
+                    input.name = field;
+                    input.placeholder = `Enter ${field} value (optional)`;
+                    groupDiv.appendChild(input);
+                });
+
+                const removeButton = document.createElement('button');
+                removeButton.textContent = 'Remove';
+                removeButton.type = 'button';
+                removeButton.onclick = function() { groupDiv.remove(); };
+                groupDiv.appendChild(removeButton);
+
+                container.appendChild(groupDiv);
+            };
+
+            window.submitForm = function() {
+                const formData = {
+                    mode: document.getElementById('mode').value || "season softcore",
+                    itemType: Array.from(document.getElementById('itemType').selectedOptions).map(opt => opt.value).filter(Boolean),
+                    class: Array.from(document.getElementById('class').selectedOptions).map(opt => opt.value).filter(Boolean),
+                    effectsGroup: Array.from(document.querySelectorAll('.effectsGroup')).map(group => {
+                        const effectIdSelect = group.querySelector('[name="effectId"]');
+                        const minValueInput = group.querySelector('[name="minValue"]');
+                        const maxValueInput = group.querySelector('[name="maxValue"]');
+
+                        return {
+                            type: "and",
+                            effects: [{
+                                id: effectIdSelect.value,
+                                value: {
+                                    min: minValueInput.value || null,
+                                    max: maxValueInput.value || null
+                                }
+                            }]
+                        };
+                    }),
+                    powerLevel: [
+                        document.getElementById('powerLevelMin').value || 0,
+                        document.getElementById('powerLevelMax').value || 1000
+                    ],
+                    sort: document.getElementById('sort').value.split(',')
+                };
+
+                console.log(JSON.stringify({formData})); // Debug: log the structured data
+
+                fetch('/construct-url', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({formData})
+                })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Success:', data);
+                    // window.location.href = 'success.html';
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Failed to submit form. Please try again later.');
+                });
+            };
+        });
+    </script>
+</body>
+</html>
