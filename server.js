@@ -5,6 +5,49 @@ const path = require('path');
 const fs = require('fs');
 const moment = require('moment');
 const FormData = require('form-data');
+const mongoose = require('mongoose');
+
+mongoose.connect('mongodb://localhost:27017/dtrade', {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+}).then(() => {
+    console.log('MongoDB connected successfully.');
+}).catch(err => {
+    console.error('MongoDB connection error:', err);
+});
+
+const listingSchema = new mongoose.Schema({
+    itemId: String,
+    name: String,
+    price: Number,
+    lastChecked: Date,
+    updatedAt: Date,
+    detailsUrl: String
+});
+
+const Listing = mongoose.model('Listing', listingSchema);
+
+async function processNewListings(newListings) {
+    for (const item of newListings) {
+        const existingListing = await Listing.findOne({ itemId: item._id });
+        if (existingListing) {
+            // Update existing listing if necessary
+            existingListing.lastChecked = new Date();
+            await existingListing.save();
+        } else {
+            // Create a new listing entry
+            const newListing = new Listing({
+                itemId: item._id,
+                name: item.name,
+                price: item.price,
+                lastChecked: new Date(),
+                updatedAt: new Date(item.updatedAt),
+                detailsUrl: `https://diablo.trade/listings/items/${item._id}`
+            });
+            await newListing.save();
+        }
+    }
+}
 
 const app = express();
 app.use(express.static('public'));
