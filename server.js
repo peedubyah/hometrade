@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const puppeteer = require('puppeteer');
@@ -150,7 +151,7 @@ async function sendToDiscord({ content, embeds, files }) {
         return; // Optionally return an error or throw here
     }
 
-    const webhookUrl = 'https://discord.com/api/webhooks/1229130694287036507/HoxAUOq2Iaq6L0eI_uUyvFmMjJ4-JdhGG-KgKwv1QPo5nwy3jlo7x0FtDM2leZxeLkce';
+    const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
     try {
         const response = await axios.post(webhookUrl, formData, {
             headers: formData.getHeaders()
