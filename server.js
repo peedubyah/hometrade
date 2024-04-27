@@ -34,6 +34,8 @@ class QueryModel {
         this.affixes = data.affixes || [];
         this.limit = data.limit || 20;
         this.payloadUri = data.payloadUri || '';
+        this.lastRun = data.lastRun || null; // trace the last succcessful run
+        this.lastItemTimestamp = data.lastItemTimestamp || null; // Timestamp of the last item fetched
     }
 
     async save() {
@@ -58,7 +60,11 @@ app.post('/construct-url', async (req, res) => {
         const affixIdentifiers = effectsGroup.map(group => group.effectId);
         const items = await fetchItems(itemType, affixIdentifiers);
 
-        for (const item of items) {
+        const batchSize = 10;
+        for (let i = 0; i < items.length; i += batchSize) {
+            const currentBatch = items.slice(i, i + batchSize);
+
+        for (const item of currentBatch) {
             const imagePath = await takeScreenshot(item._id);
             if (!imagePath) {
                 console.error('Failed to capture screenshot for item ID:', item._id);
@@ -77,6 +83,10 @@ app.post('/construct-url', async (req, res) => {
             await sendToDiscord(message);
             fs.unlinkSync(imagePath);  // Clean up the screenshot file after sending
         }
+
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        
         res.json({ message: 'Processed all items successfully.' });
     } catch (error) {
         console.error('Failed to process items:', error);
