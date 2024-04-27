@@ -69,23 +69,26 @@ async function fetchItems(itemType, affixIdentifiers) {
 // POST endpoint to receive form data and process items
 app.post('/construct-url', async (req, res) => {
     try {
-        const formData = req.body.formData;
-        const { itemType, effectsGroup } = formData;
+        const { formData } = req.body; // Correctly access formData from req.body
+        const { itemType, effectsGroup, discordUserID } = formData;
 
-        // Adjusting to the new data structure sent from the client
-        const affixIdentifiers = effectsGroup.map(group => group.effectId); // Assuming each group directly has an effectId
+        console.log("Discord User ID:", discordUserID);
+
+        const affixIdentifiers = effectsGroup.map(group => group.effectId); 
 
         const items = await fetchItems(itemType, affixIdentifiers);
         for (const item of items) {
             const imagePath = await takeScreenshot(item._id);
             const listingAge = Date.now() - new Date(item.updatedAt);
             const embed = constructEmbed(item, imagePath, listingAge);
-            await sendToDiscord({
-                content: `Check out this item: ${item.name}`,
-                embeds: embed,
-                files: imagePath
-            });
-            fs.unlinkSync(imagePath);  // Clean up the screenshot file after sending
+            const message = {
+                content: `<@${discordUserID}> Check out this new listing!`,
+                embeds: [embed],
+                files: [imagePath]
+            };
+
+            await sendToDiscord(message); // Assuming sendToDiscord function handles sending to Discord correctly
+            fs.unlinkSync(imagePath); // Clean up the screenshot file after sending
         }
         res.json({ message: 'Processed all items successfully.' });
     } catch (error) {
@@ -135,11 +138,27 @@ function formatPrice(price) {
 // Send the embed and screenshot to Discord
 async function sendToDiscord({ content, embeds, files }) {
     const formData = new FormData();
-    formData.append('payload_json', JSON.stringify({ content, embeds: [embeds] }));
-    formData.append('file', fs.createReadStream(files), { filename: path.basename(files) });
+    formData.append('payload_json', JSON.stringify({ content, embeds }));
+
+    // Ensure 'files' is actually an array
+    if (Array.isArray(files)) {
+        files.forEach(file => {
+            formData.append('file', fs.createReadStream(file), { filename: path.basename(file) });
+        });
+    } else {
+        console.error('Expected files to be an array, but received:', files);
+        return; // Optionally return an error or throw here
+    }
 
     const webhookUrl = 'https://discord.com/api/webhooks/1229130694287036507/HoxAUOq2Iaq6L0eI_uUyvFmMjJ4-JdhGG-KgKwv1QPo5nwy3jlo7x0FtDM2leZxeLkce';
-    await axios.post(webhookUrl, formData, { headers: formData.getHeaders() });
+    try {
+        const response = await axios.post(webhookUrl, formData, {
+            headers: formData.getHeaders()
+        });
+        console.log('Message sent successfully:', response.data);
+    } catch (error) {
+        console.error('Failed to send message to Discord:', error);
+    }
 }
 
 app.listen(3000, () => console.log('Server running on port 3000'));

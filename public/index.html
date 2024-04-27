@@ -61,6 +61,10 @@
                     <option value="createdAt,-1">Created At - Newest</option>
                 </select>
             </div>
+            <div class="mb-3">
+                <label for="discordUserID" class="form-label">Discord User ID:</label>
+                <input type="text" class="form-control" id="discordUserID" name="discordUserID" placeholder="Enter Discord User ID (optional)">
+            </div>
             <button type="submit" class="btn btn-primary">Submit</button>
         </form>
     </div>
@@ -138,6 +142,7 @@
                 mode: $('#mode').val(),
                 itemType: [$('#itemType').val()], // Ensure this is an array
                 class: $('#class').val(),
+                discordUserID: $('#discordUserID').val(),
                 effectsGroup: $('.effectsGroup').map(function() {
                     const $group = $(this);
                     return {
