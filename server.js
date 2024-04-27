@@ -6,23 +6,97 @@ const path = require('path');
 const fs = require('fs');
 const moment = require('moment');
 const FormData = require('form-data');
+const { MongoClient } = require('mongodb');
+
+// MongoDB setup
+const client = new MongoClient(process.env.MONGODB_URI);
+let db;
+
+async function connectToMongoDB() {
+    try {
+        await client.connect();
+        db = client.db();
+        console.log("Connected to MongoDB");
+    } catch (error) {
+        console.error("Could not connect to MongoDB:", error);
+    }
+}
+
+class QueryModel {
+    constructor(data) {
+        this.discorduser = data.discorduser || null;
+        this.searchParameters = data.searchParameters || {};
+        this.sentItemIds = data.sentItemIds || [];
+        this.itemType = data.itemType || [];
+        this.classes = data.classes || [];
+        this.powerLevelMin = data.powerLevelMin || 0;
+        this.powerLevelMax = data.powerLevelMax || 1000;
+        this.affixes = data.affixes || [];
+        this.limit = data.limit || 20;
+        this.payloadUri = data.payloadUri || '';
+    }
+
+    async save() {
+        if (!db) {
+            await connectToMongoDB();
+        }
+        const collection = db.collection('queries');
+        return collection.insertOne(this);
+    }
+}
 
 const app = express();
 app.use(express.static('public'));
 app.use(express.json());
 
-// Utility to construct the API URL based on form data
+app.post('/construct-url', async (req, res) => {
+    try {
+        const { itemType, effectsGroup, discordUserID } = req.body.formData; // Assuming formData is directly in the body
+
+        console.log("Discord User ID received:", discordUserID);  // Verify the ID is being received correctly
+
+        const affixIdentifiers = effectsGroup.map(group => group.effectId);
+        const items = await fetchItems(itemType, affixIdentifiers);
+
+        for (const item of items) {
+            const imagePath = await takeScreenshot(item._id);
+            if (!imagePath) {
+                console.error('Failed to capture screenshot for item ID:', item._id);
+                continue; // Skip this item if screenshot failed
+            }
+
+            const listingAge = Date.now() - new Date(item.updatedAt);
+            const embed = constructEmbed(item, imagePath, listingAge);
+
+            const message = {
+                content: discordUserID ? `<@${discordUserID}> Check out this new listing!` : "Check out this new listing!",  // Mention user if ID is provided
+                embeds: [embed],
+                files: [imagePath]
+            };
+
+            await sendToDiscord(message);
+            fs.unlinkSync(imagePath);  // Clean up the screenshot file after sending
+        }
+        res.json({ message: 'Processed all items successfully.' });
+    } catch (error) {
+        console.error('Failed to process items:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
+async function fetchItems(itemType, affixIdentifiers) {
+    const apiUrl = constructApiUrl(itemType, affixIdentifiers);
+    const response = await axios.get(apiUrl);
+    return response.data[0].result.data.json.data;
+}
+
 function constructApiUrl(itemType, affixIdentifiers) {
     const baseUrl = 'https://diablo.trade/api/trpc/offer.search';
-    const effects = affixIdentifiers.map(id => {
-        return {
-            id: id,
-            value: {
-                min: null,  // default or conditional based on input
-                max: null   // default or conditional based on input
-            }
-        };
-    });
+    const effects = affixIdentifiers.map(id => ({
+        id: id,
+        value: { min: null, max: null }
+    }));
 
     const inputPayload = {
         "0": {
@@ -43,7 +117,7 @@ function constructApiUrl(itemType, affixIdentifiers) {
                 "effectsGroup": [{
                     "type": "and",
                     "effects": effects,
-                    "value": null, // Explicitly setting this as null if required by API
+                    "value": null,
                     "effectType": "affixes"
                 }]
             },
@@ -60,69 +134,27 @@ function constructApiUrl(itemType, affixIdentifiers) {
     return `${baseUrl}?batch=1&input=${inputParam}`;
 }
 
-// Fetch items from the API based on data received from the form
-async function fetchItems(itemType, affixIdentifiers) {
-    const apiUrl = constructApiUrl(itemType, affixIdentifiers);
-    const response = await axios.get(apiUrl);
-    return response.data[0].result.data.json.data;
-}
 
-// POST endpoint to receive form data and process items
-app.post('/construct-url', async (req, res) => {
-    try {
-        const { formData } = req.body; // Correctly access formData from req.body
-        const { itemType, effectsGroup, discordUserID } = formData;
-
-        console.log("Discord User ID:", discordUserID);
-
-        const affixIdentifiers = effectsGroup.map(group => group.effectId); 
-
-        const items = await fetchItems(itemType, affixIdentifiers);
-        for (const item of items) {
-            const imagePath = await takeScreenshot(item._id);
-            const listingAge = Date.now() - new Date(item.updatedAt);
-            const embed = constructEmbed(item, imagePath, listingAge);
-            const message = {
-                content: `<@${discordUserID}> Check out this new listing!`,
-                embeds: [embed],
-                files: [imagePath]
-            };
-
-            await sendToDiscord(message); // Assuming sendToDiscord function handles sending to Discord correctly
-            fs.unlinkSync(imagePath); // Clean up the screenshot file after sending
-        }
-        res.json({ message: 'Processed all items successfully.' });
-    } catch (error) {
-        console.error('Failed to process items:', error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// Take a screenshot of the item listing
 async function takeScreenshot(id) {
     const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
     const page = await browser.newPage();
     const url = `https://diablo.trade/listings/items/${id}`;
     await page.goto(url, { waitUntil: 'networkidle0' });
     const imagePath = path.join(__dirname, `${id}.png`);
-    try {
-        const element = await page.$('.relative.mx-auto.h-fit.w-64.border-\\[20px\\].sm\\:w-72.sm\\:border-\\[24px\\].flip-card-face');
-        await element.screenshot({ path: imagePath });
-    } finally {
-        await browser.close();
-    }
+    const element = await page.$('.relative.mx-auto.h-fit.w-64.border-\\[20px\\].sm\\:w-72.sm\\:border-\\[24px\\].flip-card-face');
+    await element.screenshot({ path: imagePath });
+    await browser.close();
     return imagePath;
 }
 
-// Construct a Discord embed for the item
 function constructEmbed(item, imagePath, listingAge) {
     return {
         title: item.userId.name || 'Unknown Seller',
+        description: '**Click on the btag to view listing**',
         url: `https://diablo.trade/listings/items/${item._id}`,
         color: 0x0099ff,
-        description: '**Click on the btag to view listing**',
         fields: [
-            { name: 'Price', value: formatPrice(item.price), inline: true },
+            { name: 'Price', value: `${item.price / 1000000} Million(s)`, inline: true },
             { name: 'Listing Age', value: moment.duration(listingAge).humanize(), inline: true }
         ],
         image: { url: 'attachment://' + path.basename(imagePath) },
@@ -131,12 +163,6 @@ function constructEmbed(item, imagePath, listingAge) {
     };
 }
 
-// Format item price for the embed
-function formatPrice(price) {
-    return `${(price / 1000000).toFixed(2)} Million(s)`;
-}
-
-// Send the embed and screenshot to Discord
 async function sendToDiscord({ content, embeds, files }) {
     const formData = new FormData();
     formData.append('payload_json', JSON.stringify({ content, embeds }));
